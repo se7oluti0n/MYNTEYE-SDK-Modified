@@ -11,25 +11,26 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <nodelet/loader.h>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
 #include "mynteye/logger.h"
 
 int main(int argc, char *argv[]) {
   glog_init _(argc, argv);
 
-  ros::init(argc, argv, "mynteye_wrapper_node");
-  ros::console::set_logger_level(
-      ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
+  rclcpp::init(argc, argv);
+  // ros::init(argc, argv, "mynteye_wrapper_node");
+  // ros::console::set_logger_level(
+  //     ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
 
-  nodelet::Loader nodelet;
-  nodelet::M_string remap(ros::names::getRemappings());
-  nodelet::V_string nargv;
-  nodelet.load(
-      ros::this_node::getName(), "mynteye/ROSWrapperNodelet", remap, nargv);
+  // nodelet::Loader nodelet;
+  // nodelet::M_string remap(ros::names::getRemappings());
+  // nodelet::V_string nargv;
+  // nodelet.load(
+  //     ros::this_node::getName(), "mynteye/ROSWrapperNodelet", remap, nargv);
 
-  ros::spin();
+  // ros::spin();
 
+  rclcpp::shutdown();
   return 0;
 }

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.5)
 project(mynt_eye_ros_wrapper)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -21,55 +21,42 @@ endif()
 
 # packages
 
-function(checkPackage package customMessage)
-  set(varName "${package}_FOUND")
-  if (NOT "${${varName}}")
-    string(REPLACE "_" "-" aptPackage ${package})
-    if("${customMessage}" STREQUAL "")
-      message(FATAL_ERROR "\n\n ${package} is missing, please try to install it with:\n sudo apt-get install ros-$(rosversion -d)-${aptPackage}\n\n")
-    else()
-      message(FATAL_ERROR "\n\n ${customMessage} \n\n")
-    endif()
-  endif()
-endfunction(checkPackage)
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
-find_package(catkin REQUIRED COMPONENTS
+find_package(builtin_interfaces REQUIRED)
+
+find_package(cv_bridge REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(mynt_eye_ros_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem program_options system)
+include_directories(${Boost_INCLUDE_DIRS})
+
+set(dependencies 
   cv_bridge
   geometry_msgs
   image_transport
-  message_generation
-  nodelet
-  roscpp
+  rclcpp
   sensor_msgs
   std_msgs
-  tf
+  tf2_ros
+  tf2_geometry_msgs
+  visualization_msgs
+  mynt_eye_ros_msgs
+  tf2
+  rosidl_default_generators
+  builtin_interfaces
 )
-
-checkPackage("cv_bridge" "")
-checkPackage("geometry_msgs" "")
-checkPackage("image_transport" "")
-checkPackage("message_generation" "")
-checkPackage("nodelet" "")
-checkPackage("roscpp" "")
-checkPackage("sensor_msgs" "")
-checkPackage("std_msgs" "")
-checkPackage("tf" "")
 
 ## messages
-
-add_service_files(
-  FILES
-  GetInfo.srv
-)
-
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-)
-
-catkin_package(
-  CATKIN_DEPENDS cv_bridge geometry_msgs image_transport message_runtime nodelet roscpp sensor_msgs std_msgs tf
-)
 
 #get_filename_component(SDK_DIR "${PROJECT_SOURCE_DIR}/../../../.." ABSOLUTE)
 #LIST(APPEND CMAKE_PREFIX_PATH ${SDK_DIR}/_install/lib/cmake)
@@ -91,31 +78,29 @@ endif()
 
 # targets
 
-add_compile_options(-std=c++11)
+add_compile_options(-std=c++17)
 
 include_directories(
-  ${catkin_INCLUDE_DIRS}
   ${SDK_DIR}/src
 )
 
 set(LINK_LIBS
-  ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
   mynteye
 )
 
 add_library(mynteye_wrapper src/wrapper_nodelet.cc)
-target_link_libraries(mynteye_wrapper ${LINK_LIBS})
-add_dependencies(mynteye_wrapper ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(mynteye_wrapper ${LINK_LIBS} )
+
+
+ament_target_dependencies(mynteye_wrapper
+  ${dependencies}
+)
 
 add_executable(mynteye_wrapper_node src/wrapper_node.cc)
 target_link_libraries(mynteye_wrapper_node mynteye_wrapper ${LINK_LIBS})
 
-if(MSVC OR MSYS OR MINGW)
-  target_compile_definitions(mynteye_wrapper_node
-    PUBLIC GLOG_NO_ABBREVIATED_SEVERITIES
-  )
-endif()
 
 # install
 
@@ -125,19 +110,22 @@ endif()
 #)
 
 install(TARGETS mynteye_wrapper mynteye_wrapper_node
-  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+  DESTINATION share/${PROJECT_NAME}/
 )
 
 install(DIRECTORY rviz/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/rviz
+  DESTINATION share/${PROJECT_NAME}/
 )
 
-install(FILES nodelet_plugins.xml
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
+# install(FILES nodelet_plugins.xml
+#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+# )
+
+ament_export_dependencies(${dependencies} rosidl_default_runtime)
+ament_package()

@@ -11,29 +11,31 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <nodelet/nodelet.h>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
 #include <cv_bridge/cv_bridge.h>
-#include <image_transport/image_transport.h>
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/Temperature.h>
-#include <sensor_msgs/image_encodings.h>
-#include <sensor_msgs/point_cloud2_iterator.h>
-#include <sensor_msgs/distortion_models.h>
-#include <visualization_msgs/Marker.h>
-#include <tf/tf.h>
+#include <image_transport/image_transport.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/temperature.hpp>
+#include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
+
+#include <visualization_msgs/msg/marker.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 
 #include <opencv2/calib3d/calib3d.hpp>
 
-#include <mynt_eye_ros_wrapper/GetInfo.h>
-
+#include <mynt_eye_ros_msgs/srv/get_info.hpp>
 #define _USE_MATH_DEFINES
 #include <cmath>
 #include <map>
 #include <string>
+#include <cassert>
+ 
+// Use (void) to silence unused warnings.
+#define assertm(exp, msg) assert(((void)msg, exp))
 
 #include "mynteye/logger.h"
 #include "mynteye/api/api.h"
@@ -58,9 +60,9 @@ inline double compute_time(const double end, const double start) {
   return end - start;
 }
 
-class ROSWrapperNodelet : public nodelet::Nodelet {
+class ROSWrapperNodelet {
  public:
-  ROSWrapperNodelet() :
+  ROSWrapperNodelet(rclcpp::Node::SharedPtr &node) :
   mesh_position_x(0.),
   mesh_position_y(-0.176),
   mesh_position_z(0.),
@@ -69,7 +71,9 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   mesh_rotation_z(PIE/2),
   skip_tag(-1),
   skip_tmp_left_tag(0),
-  skip_tmp_right_tag(0) {
+  skip_tmp_right_tag(0),
+  node_(node) {
+    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
     unit_hard_time *= 10;
   }
 
@@ -79,7 +83,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       api_->Stop(Source::ALL);
     }
     if (time_beg_ != -1) {
-      double time_end = ros::Time::now().toSec();
+      double time_end = node_->get_clock()->now().seconds();
 
       LOG(INFO) << "Time elapsed: " << compute_time(time_end, time_beg_)
                 << " s";
@@ -115,13 +119,13 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     }
   }
 
-  ros::Time hardTimeToSoftTime(std::uint64_t _hard_time) {
+  rclcpp::Time hardTimeToSoftTime(std::uint64_t _hard_time) {
     static bool isInited = false;
     static double soft_time_begin(0);
     static std::uint64_t hard_time_begin(0);
 
     if (false == isInited) {
-      soft_time_begin = ros::Time::now().toSec();
+      soft_time_begin = node_->get_clock()->now().seconds();
       hard_time_begin = _hard_time;
       isInited = true;
     }
@@ -130,23 +134,23 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     std::uint64_t time_ns_detal_s = time_ns_detal / 1000000;
     std::uint64_t time_ns_detal_ns = time_ns_detal % 1000000;
     double time_sec_double =
-      ros::Time(time_ns_detal_s, time_ns_detal_ns * 1000).toSec();
+      rclcpp::Time(time_ns_detal_s, time_ns_detal_ns * 1000).seconds();
 
-    return ros::Time(soft_time_begin + time_sec_double);
+    return rclcpp::Time(static_cast<uint64_t>((soft_time_begin + time_sec_double) * 1e9));
   }
 
-  // ros::Time hardTimeToSoftTime(std::uint64_t _hard_time) {
+  // rclcpp::Time hardTimeToSoftTime(std::uint64_t _hard_time) {
   //   static bool isInited = false;
   //   static double soft_time_begin(0);
   //   static std::uint64_t hard_time_begin(0);
 
   //   if (false == isInited) {
-  //     soft_time_begin = ros::Time::now().toSec();
+  //     soft_time_begin = node_->get_clock()->now().seconds();
   //     hard_time_begin = _hard_time;
   //     isInited = true;
   //   }
 
-  //   return ros::Time(
+  //   return rclcpp::Time(
   //       static_cast<double>(soft_time_begin +
   //       static_cast<double>(_hard_time - hard_time_begin) * 0.000001f));
   // }
@@ -168,7 +172,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     return (now < pre) && ((pre - now) < (unit_hard_time / 4));
   }
 
-  ros::Time checkUpTimeStamp(std::uint64_t _hard_time,
+  rclcpp::Time checkUpTimeStamp(std::uint64_t _hard_time,
       const Stream &stream) {
     static std::map<Stream, std::uint64_t> hard_time_now;
     static std::map<Stream, std::uint64_t> acc;
@@ -183,7 +187,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         acc[stream] * unit_hard_time + _hard_time);
   }
 
-  ros::Time checkUpImuTimeStamp(std::uint64_t _hard_time) {
+  rclcpp::Time checkUpImuTimeStamp(std::uint64_t _hard_time) {
     static std::uint64_t hard_time_now(0), acc(0);
 
     if (is_overflow(_hard_time, hard_time_now)) {
@@ -196,12 +200,12 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         acc * unit_hard_time + _hard_time);
   }
 
-  void onInit() override {
-    nh_ = getMTNodeHandle();
-    private_nh_ = getMTPrivateNodeHandle();
+  void onInit() {
+    // nh_ = getMTNodeHandle();
+    // private_nh_ = getMTPrivateNodeHandle();
 
     initDevice();
-    NODELET_FATAL_COND(api_ == nullptr, "No MYNT EYE device selected :(");
+    // NODELET_FATAL_COND(api_ == nullptr, "No MYNT EYE device selected :(");
 
     pthread_mutex_init(&mutex_data_, nullptr);
 
@@ -220,7 +224,8 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     std::map<Stream, std::string> stream_topics{};
     for (auto &&it = stream_names.begin(); it != stream_names.end(); ++it) {
       stream_topics[it->first] = it->second;
-      private_nh_.getParamCached(it->second + "_topic", stream_topics[it->first]);
+      node_->declare_parameter(it->second + "_topic", "");
+      node_->get_parameter(it->second + "_topic", stream_topics[it->first]);
 
       // if published init
       is_published_[it->first] = false;
@@ -236,33 +241,42 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     std::map<Stream, std::string> mono_topics{};
     for (auto &&it = mono_names.begin(); it != mono_names.end(); ++it) {
       mono_topics[it->first] = it->second;
-      private_nh_.getParamCached(it->second + "_topic", mono_topics[it->first]);
+      node_->declare_parameter(it->second + "_topic", "");
+      node_->get_parameter(it->second + "_topic", mono_topics[it->first]);
     }
 
     std::string imu_topic = "imu";
     std::string temperature_topic = "temperature";
-    private_nh_.getParamCached("imu_topic", imu_topic);
-    private_nh_.getParamCached("temperature_topic", temperature_topic);
+    node_->declare_parameter("imu_topic", "");
+    node_->get_parameter("imu_topic", imu_topic);
+    node_->declare_parameter("temperature_topic", "");
+    node_->get_parameter("temperature_topic", temperature_topic);
 
     base_frame_id_ = "camera_link";
-    private_nh_.getParamCached("base_frame_id", base_frame_id_);
+    node_->declare_parameter("base_frame_id", "");
+    node_->get_parameter("base_frame_id", base_frame_id_);
 
     for (auto &&it = stream_names.begin(); it != stream_names.end(); ++it) {
       frame_ids_[it->first] = "camera_" + it->second + "_frame";
-      private_nh_.getParamCached(it->second + "_frame_id", frame_ids_[it->first]);
+      node_->declare_parameter(it->second + "_frame_id", "");
+      node_->get_parameter(it->second + "_frame_id", frame_ids_[it->first]);
     }
 
     imu_frame_id_ = "camera_imu_frame";
     temperature_frame_id_ = "camera_temperature_frame";
-    private_nh_.getParamCached("imu_frame_id", imu_frame_id_);
-    private_nh_.getParamCached("temperature_frame_id", temperature_frame_id_);
+    node_->declare_parameter("imu_frame_id", "");
+    node_->get_parameter("imu_frame_id", imu_frame_id_);
+    node_->declare_parameter("temperature_frame_id", "");
+    node_->get_parameter("temperature_frame_id", temperature_frame_id_);
 
     gravity_ = 9.8;
-    private_nh_.getParamCached("gravity", gravity_);
+    node_->declare_parameter("gravity", gravity_);
+    node_->get_parameter("gravity", gravity_);
 
     int tmp_disparity_type_ = 0;
     disparity_type_ = DisparityComputingMethod::BM;
-    private_nh_.getParamCached("disparity_computing_method", tmp_disparity_type_);
+    node_->declare_parameter("disparity_computing_method", tmp_disparity_type_);
+    node_->get_parameter("disparity_computing_method", tmp_disparity_type_);
     disparity_type_ = (DisparityComputingMethod)tmp_disparity_type_;
     api_->SetDisparityComputingMethodType(disparity_type_);
 
@@ -335,26 +349,27 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       if (!api_->Supports(it->first))
         continue;
       int value = -1;
-      private_nh_.getParamCached(it->second, value);
+      node_->declare_parameter(it->second, value);
+      node_->get_parameter(it->second, value);
       if (value != -1) {
-        NODELET_INFO_STREAM("Set " << it->second << " to " << value);
+        RCLCPP_INFO_STREAM(node_->get_logger(), "Set " << it->second << " to " << value);
         api_->SetOptionValue(it->first, value);
       }
-      NODELET_INFO_STREAM(it->first << ": " << api_->GetOptionValue(it->first));
+      RCLCPP_INFO_STREAM(node_->get_logger(), it->first << ": " << api_->GetOptionValue(it->first));
     }
 
     // publishers
 
-    image_transport::ImageTransport it_mynteye(nh_);
+    image_transport::ImageTransport it_mynteye(node_);
 
     for (auto &&it = stream_names.begin(); it != stream_names.end(); ++it) {
       auto &&topic = stream_topics[it->first];
       if (it->first == Stream::POINTS) {  // pointcloud
-        points_publisher_ = nh_.advertise<sensor_msgs::PointCloud2>(topic, 1);
+        points_publisher_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(topic, 1);
       } else {  // camera
         camera_publishers_[it->first] = it_mynteye.advertiseCamera(topic, 1);
       }
-      NODELET_INFO_STREAM("Advertized on topic " << topic);
+      RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized on topic " << topic);
     }
 
     // Only STANDARD2/STANDARD210A/STANDARD200B need publish mono_topics
@@ -368,12 +383,14 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
             it->first == Stream::LEFT_RECTIFIED) {
           mono_publishers_[it->first] = it_mynteye.advertise(topic, 1);
         }
-        NODELET_INFO_STREAM("Advertized on topic " << topic);
+        RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized on topic " << topic);
       }
     }
 
     int depth_type = 0;
-    private_nh_.getParamCached("depth_type", depth_type);
+    // private_nh_.getParamCached("depth_type", depth_type);
+    node_->declare_parameter("depth_type", depth_type);
+    node_->get_parameter("depth_type", depth_type);
     if (model_ == Model::STANDARD2 ||
         model_ == Model::STANDARD210A || model_ == Model::STANDARD200B) {
       camera_encodings_ = {{Stream::LEFT, enc::BGR8},
@@ -403,17 +420,18 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           {Stream::DEPTH, enc::TYPE_16UC1}};
       }
     }
-    pub_imu_ = nh_.advertise<sensor_msgs::Imu>(imu_topic, 100);
-    NODELET_INFO_STREAM("Advertized on topic " << imu_topic);
+    pub_imu_ = node_->create_publisher<sensor_msgs::msg::Imu>(imu_topic, 100);
+    RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized on topic " << imu_topic);
 
-    pub_temperature_ = nh_.advertise<
-                        sensor_msgs::Temperature>(temperature_topic, 100);
-    NODELET_INFO_STREAM("Advertized on topic " << temperature_topic);
+    pub_temperature_ = node_->create_publisher<
+                        sensor_msgs::msg::Temperature>(temperature_topic, 100);
+    RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized on topic " << temperature_topic);
 
-    pub_mesh_ = nh_.advertise<visualization_msgs::Marker>("camera_mesh", 0 );
+    pub_mesh_ = node_->create_publisher<visualization_msgs::msg::Marker>("camera_mesh", 0 );
     // where to get the mesh from
     std::string mesh_file;
-    if (private_nh_.getParamCached("s1030_mesh_file", mesh_file)) {
+    node_->declare_parameter("s1030_mesh_file", "");
+    if (node_->get_parameter("s1030_mesh_file", mesh_file)) {
       mesh_msg_.mesh_resource = "package://mynt_eye_ros_wrapper/mesh/"+mesh_file;
     } else {
       LOG(INFO) << "no mesh found for visualisation, set ros param mesh_file, if desired";
@@ -429,16 +447,19 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         if (!api_->Supports(it->first))
           continue;
         bool enabled = false;
-        private_nh_.getParamCached("enable_" + it->second, enabled);
+        // private_nh_.getParamCached("enable_" + it->second, enabled);
+        node_->declare_parameter("enable_" + it->second, enabled);
+        node_->get_parameter("enable_" + it->second, enabled);
         if (enabled) {
           api_->EnableStreamData(it->first);
-          NODELET_INFO_STREAM("Enable stream data of " << it->first);
+          RCLCPP_INFO_STREAM(node_->get_logger(), "Enable stream data of " << it->first);
         }
       }
     }
 
     int ros_output_framerate = -1;
-    private_nh_.getParamCached("ros_output_framerate_cut", ros_output_framerate);
+    node_->declare_parameter("ros_output_framerate_cut", ros_output_framerate);
+    node_->get_parameter("ros_output_framerate_cut", ros_output_framerate);
     if (ros_output_framerate > 0 && ros_output_framerate < 7) {
       skip_tag = ros_output_framerate;
     }
@@ -446,52 +467,64 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     // services
 
     const std::string DEVICE_INFO_SERVICE = "get_info";
-    get_info_service_ = nh_.advertiseService(
-        DEVICE_INFO_SERVICE, &ROSWrapperNodelet::getInfo, this);
-    NODELET_INFO_STREAM("Advertized service " << DEVICE_INFO_SERVICE);
+    // get_info_service_ = node_->create_publisherService(
+    //     DEVICE_INFO_SERVICE, &ROSWrapperNodelet::getInfo, this);
+    node_->create_service<mynt_eye_ros_msgs::srv::GetInfo>(
+          DEVICE_INFO_SERVICE,
+          std::bind(&ROSWrapperNodelet::getInfo, this, std::placeholders::_1,
+                    std::placeholders::_2));
+    RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized service " << DEVICE_INFO_SERVICE);
+
+    node_->declare_parameter("model_rotation_x", 0);
+    node_->declare_parameter("model_rotation_y", 0);
+    node_->declare_parameter("model_rotation_z", 0);
+    node_->declare_parameter("model_position_x", 0);
+    node_->declare_parameter("model_position_y", 0);
+    node_->declare_parameter("model_position_z", 0);
+    node_->declare_parameter("is_laserscan", false);
 
     publishStaticTransforms();
-    ros::Rate loop_rate(frame_rate_);
-    while (private_nh_.ok()) {
-      publishTopics();
-      loop_rate.sleep();
-    }
+    // ros::Rate loop_rate(frame_rate_);
+    // while (private_nh_.ok()) {
+    //   publishTopics();
+    //   loop_rate.sleep();
+    // }
   }
 
   bool getInfo(
-      mynt_eye_ros_wrapper::GetInfo::Request &req,     // NOLINT
-      mynt_eye_ros_wrapper::GetInfo::Response &res) {  // NOLINT
-    using Request = mynt_eye_ros_wrapper::GetInfo::Request;
-    switch (req.key) {
+      const mynt_eye_ros_msgs::srv::GetInfo::Request::SharedPtr req,     // NOLINT
+      mynt_eye_ros_msgs::srv::GetInfo::Response::SharedPtr res) {  // NOLINT
+    using Request = mynt_eye_ros_msgs::srv::GetInfo::Request;
+    switch (req->key) {
       case Request::DEVICE_NAME:
-        res.value = api_->GetInfo(Info::DEVICE_NAME);
+        res->value = api_->GetInfo(Info::DEVICE_NAME);
         break;
       case Request::SERIAL_NUMBER:
-        res.value = api_->GetInfo(Info::SERIAL_NUMBER);
+        res->value = api_->GetInfo(Info::SERIAL_NUMBER);
         break;
       case Request::FIRMWARE_VERSION:
-        res.value = api_->GetInfo(Info::FIRMWARE_VERSION);
+        res->value = api_->GetInfo(Info::FIRMWARE_VERSION);
         break;
       case Request::HARDWARE_VERSION:
-        res.value = api_->GetInfo(Info::HARDWARE_VERSION);
+        res->value = api_->GetInfo(Info::HARDWARE_VERSION);
         break;
       case Request::SPEC_VERSION:
-        res.value = api_->GetInfo(Info::SPEC_VERSION);
+        res->value = api_->GetInfo(Info::SPEC_VERSION);
         break;
       case Request::LENS_TYPE:
-        res.value = api_->GetInfo(Info::LENS_TYPE);
+        res->value = api_->GetInfo(Info::LENS_TYPE);
         break;
       case Request::IMU_TYPE:
-        res.value = api_->GetInfo(Info::IMU_TYPE);
+        res->value = api_->GetInfo(Info::IMU_TYPE);
         break;
       case Request::NOMINAL_BASELINE:
-        res.value = api_->GetInfo(Info::NOMINAL_BASELINE);
+        res->value = api_->GetInfo(Info::NOMINAL_BASELINE);
         break;
       case Request::AUXILIARY_CHIP_VERSION:
-        res.value = api_->GetInfo(Info::AUXILIARY_CHIP_VERSION);
+        res->value = api_->GetInfo(Info::AUXILIARY_CHIP_VERSION);
         break;
       case Request::ISP_VERSION:
-        res.value = api_->GetInfo(Info::ISP_VERSION);
+        res->value = api_->GetInfo(Info::ISP_VERSION);
         break;
       case Request::IMG_INTRINSICS:
       {
@@ -536,7 +569,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
             }}
           };
           std::string json = dump_string(intrinsics, configuru::JSON);
-          res.value = json;
+          res->value = json;
         } else if (calib_model == CalibrationModel::KANNALA_BRANDT) {
           auto intri_left =
               api_->GetIntrinsics<IntrinsicsEquidistant>(Stream::LEFT);
@@ -574,10 +607,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
             }}
           };
           std::string json = dump_string(intrinsics, configuru::JSON);
-          res.value = json;
+          res->value = json;
         } else {
-          NODELET_INFO_STREAM("INVALID CALIB INTRINSICS" << calib_model);
-          res.value = "null";
+          RCLCPP_INFO_STREAM(node_->get_logger(), "INVALID CALIB INTRINSICS" << calib_model);
+          res->value = "null";
         }
       }
       break;
@@ -591,7 +624,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           {"translation",  Config::array({extri.translation[0], extri.translation[1], extri.translation[2]})} // NOLINT
         };
         std::string json = dump_string(extrinsics, configuru::JSON);
-        res.value = json;
+        res->value = json;
       }
       break;
       case Request::IMU_INTRINSICS:
@@ -617,7 +650,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           }}
         };
         std::string json = dump_string(intrinsics, JSON);
-        res.value = json;
+        res->value = json;
       }
       break;
       case Request::IMU_EXTRINSICS:
@@ -630,11 +663,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           {"translation",  Config::array({extri.translation[0], extri.translation[1], extri.translation[2]})} // NOLINT
         };
         std::string json = dump_string(extrinsics, configuru::JSON);
-        res.value = json;
+        res->value = json;
       }
       break;
       default:
-        NODELET_WARN_STREAM("Info of key " << req.key << " not exist");
+        RCLCPP_WARN_STREAM(node_->get_logger(), "Info of key " << req->key << " not exist");
         return false;
     }
     return true;
@@ -642,7 +675,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
 
   void publishData(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
-      ros::Time stamp) {
+      rclcpp::Time stamp) {
     if (stream == Stream::LEFT || stream == Stream::RIGHT) {
       return;
     } else if (stream == Stream::POINTS) {
@@ -658,11 +691,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
 
   int getStreamSubscribers(const Stream &stream) {
     if (stream == Stream::POINTS) {
-      return points_publisher_.getNumSubscribers();
+      return points_publisher_->get_subscription_count();
     }
     auto pub = camera_publishers_[stream];
     if (pub)
-      return pub.getNumSubscribers();
+      return pub.getNumSubscribers() ;
     return -1;
   }
 
@@ -672,7 +705,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       api_->EnableStreamData(stream);
       api_->SetStreamCallback(
           stream, [this, stream](const api::StreamData &data) {
-            ros::Time stamp = checkUpTimeStamp(
+            rclcpp::Time stamp = checkUpTimeStamp(
                 data.img->timestamp, stream);
             static std::size_t count = 0;
             ++count;
@@ -704,8 +737,8 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           Stream::LEFT, [&](const api::StreamData &data) {
             ++left_count_;
             if (left_count_ > 10) {
-              // ros::Time stamp = hardTimeToSoftTime(data.img->timestamp);
-              ros::Time stamp = checkUpTimeStamp(
+              // rclcpp::Time stamp = hardTimeToSoftTime(data.img->timestamp);
+              rclcpp::Time stamp = checkUpTimeStamp(
                   data.img->timestamp, Stream::LEFT);
               if (skip_tag > 0) {
                 if (skip_tmp_left_tag == 0) {
@@ -723,7 +756,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
               }
               publishCamera(Stream::LEFT, data, left_count_, stamp);
               publishMono(Stream::LEFT, data, left_count_, stamp);
-              NODELET_DEBUG_STREAM(
+              RCLCPP_DEBUG_STREAM(node_->get_logger(), 
                   Stream::LEFT << ", count: " << left_count_
                       << ", frame_id: " << data.img->frame_id
                       << ", timestamp: " << data.img->timestamp
@@ -731,7 +764,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
                       << ", exposure_time: " << data.img->exposure_time);
             }
           });
-      left_time_beg_ = ros::Time::now().toSec();
+      left_time_beg_ = node_->get_clock()->now().seconds();
       is_published_[Stream::LEFT] = true;
     }
 
@@ -742,8 +775,8 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
           Stream::RIGHT, [&](const api::StreamData &data) {
             ++right_count_;
             if (right_count_ > 10) {
-              // ros::Time stamp = hardTimeToSoftTime(data.img->timestamp);
-              ros::Time stamp = checkUpTimeStamp(
+              // rclcpp::Time stamp = hardTimeToSoftTime(data.img->timestamp);
+              rclcpp::Time stamp = checkUpTimeStamp(
                   data.img->timestamp, Stream::RIGHT);
               if (skip_tag > 0) {
                 if (skip_tmp_right_tag == 0) {
@@ -778,7 +811,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
               }
               publishCamera(Stream::RIGHT, data, right_count_, stamp);
               publishMono(Stream::RIGHT, data, right_count_, stamp);
-              NODELET_DEBUG_STREAM(
+              RCLCPP_DEBUG_STREAM(node_->get_logger(), 
                   Stream::RIGHT << ", count: " << right_count_
                       << ", frame_id: " << data.img->frame_id
                       << ", timestamp: " << data.img->timestamp
@@ -786,7 +819,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
                       << ", exposure_time: " << data.img->exposure_time);
             }
           });
-      right_time_beg_ = ros::Time::now().toSec();
+      right_time_beg_ = node_->get_clock()->now().seconds();
       is_published_[Stream::RIGHT] = true;
     }
 
@@ -801,10 +834,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
 
     if (!is_motion_published_) {
       api_->SetMotionCallback([this](const api::MotionData &data) {
-      ros::Time stamp = checkUpImuTimeStamp(data.imu->timestamp);
+      rclcpp::Time stamp = checkUpImuTimeStamp(data.imu->timestamp);
 
       // static double imu_time_prev = -1;
-      // NODELET_INFO_STREAM("ros_time_beg: " << FULL_PRECISION << ros_time_beg
+      // RCLCPP_INFO_STREAM(node_->get_logger(), "ros_time_beg: " << FULL_PRECISION << ros_time_beg
       //     << ", imu_time_elapsed: " << FULL_PRECISION
       //     << ((data.imu->timestamp - imu_time_beg) * 0.00001f)
       //     << ", imu_time_diff: " << FULL_PRECISION
@@ -826,13 +859,13 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
               publishTemperature(data.imu->temperature, imu_count_, stamp);
             }
           } else {
-            NODELET_WARN_STREAM("Motion data is empty");
+            RCLCPP_WARN_STREAM(node_->get_logger(), "Motion data is empty");
           }
         } else {
           publishImu(data, imu_count_, stamp);
           publishTemperature(data.imu->temperature, imu_count_, stamp);
         }
-        NODELET_DEBUG_STREAM(
+        RCLCPP_DEBUG_STREAM(node_->get_logger(), 
             "Imu count: " << imu_count_
                           << ", timestamp: " << data.imu->timestamp
                           << ", is_ets: " << std::boolalpha << data.imu->is_ets
@@ -844,15 +877,16 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
                           << ", gyro_z: " << data.imu->gyro[2]
                           << ", temperature: " << data.imu->temperature);
         // Sleep 1ms, otherwise publish may drop some datas.
-        ros::Duration(0.001).sleep();
+        // rclcpp::Duration(0.001).sleep();
+        usleep(1000);
       }
       });
-      imu_time_beg_ = ros::Time::now().toSec();
+      imu_time_beg_ = node_->get_clock()->now().seconds();
       is_motion_published_ = true;
     }
 
     if (!is_started_) {
-      time_beg_ = ros::Time::now().toSec();
+      time_beg_ = node_->get_clock()->now().seconds();
       api_->Start(Source::ALL);
       is_started_ = true;
     }
@@ -860,11 +894,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
 
   void publishCamera(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
-      ros::Time stamp) {
-    // if (camera_publishers_[stream].getNumSubscribers() == 0)
+      rclcpp::Time stamp) {
+    // if (camera_publishers_[stream]->get_subscription_count() == 0)
     //   return;
-    std_msgs::Header header;
-    header.seq = seq;
+    std_msgs::msg::Header header;
+    // header.seq = seq;
     header.stamp = stamp;
     header.frame_id = frame_ids_[stream];
     pthread_mutex_lock(&mutex_data_);
@@ -872,22 +906,22 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     if (stream == Stream::DISPARITY) {  // 32FC1 > 8UC1 = MONO8
       img.convertTo(img, CV_8UC1);
     }
-    auto &&msg =
+    auto msg =
         cv_bridge::CvImage(header, camera_encodings_[stream], img).toImageMsg();
     pthread_mutex_unlock(&mutex_data_);
-    auto &&info = getCameraInfo(stream);
+    auto info = getCameraInfo(stream);
     info->header.stamp = msg->header.stamp;
     info->header.frame_id = frame_ids_[stream];
-    camera_publishers_[stream].publish(msg, info);
+    camera_publishers_[stream].publish(*msg, *info);
   }
 
   /*
   void publishImage(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
-      ros::Time stamp) {
-    if (image_publishers_[stream].getNumSubscribers() == 0)
+      rclcpp::Time stamp) {
+    if (image_publishers_[stream]->get_subscription_count() == 0)
       return;
-    std_msgs::Header header;
+    std_msgs::msg::Header header;
     header.seq = seq;
     header.stamp = stamp;
     header.frame_id = frame_ids_[stream];
@@ -897,36 +931,36 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     }
     auto &&msg =
         cv_bridge::CvImage(header, image_encodings_[stream], img).toImageMsg();
-    image_publishers_[stream].publish(msg);
+    image_publishers_[stream]->publish(msg);
   }
   */
 
   void publishMono(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
-      ros::Time stamp) {
+      rclcpp::Time stamp) {
     if (mono_publishers_[stream].getNumSubscribers() == 0)
       return;
-    std_msgs::Header header;
-    header.seq = seq;
+    std_msgs::msg::Header header;
+    // header.seq = seq;
     header.stamp = stamp;
     header.frame_id = frame_ids_[stream];
     pthread_mutex_lock(&mutex_data_);
     cv::Mat mono;
     cv::cvtColor(data.frame, mono, CV_RGB2GRAY);
-    auto &&msg = cv_bridge::CvImage(header, enc::MONO8, mono).toImageMsg();
+    auto msg = cv_bridge::CvImage(header, enc::MONO8, mono).toImageMsg();
     pthread_mutex_unlock(&mutex_data_);
-    mono_publishers_[stream].publish(msg);
+    mono_publishers_[stream].publish(*msg);
   }
 
   void publishPoints(
-      const api::StreamData &data, std::uint32_t seq, ros::Time stamp) {
-    // if (points_publisher_.getNumSubscribers() == 0)
+      const api::StreamData &data, std::uint32_t seq, rclcpp::Time stamp) {
+    // if (points_publisher_->get_subscription_count() == 0)
     //   return;
 
     auto &&in = api_->GetIntrinsicsBase(Stream::LEFT);
 
-    sensor_msgs::PointCloud2 msg;
-    msg.header.seq = seq;
+    sensor_msgs::msg::PointCloud2 msg;
+    // msg.header.seq = seq;
     msg.header.stamp = stamp;
     msg.header.frame_id = frame_ids_[Stream::POINTS];
     msg.width = in->width;
@@ -936,10 +970,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     sensor_msgs::PointCloud2Modifier modifier(msg);
 
     modifier.setPointCloud2Fields(
-        4, "x", 1, sensor_msgs::PointField::FLOAT32, "y", 1,
-        sensor_msgs::PointField::FLOAT32, "z", 1,
-        sensor_msgs::PointField::FLOAT32, "rgb", 1,
-        sensor_msgs::PointField::FLOAT32);
+        4, "x", 1, sensor_msgs::msg::PointField::FLOAT32, "y", 1,
+        sensor_msgs::msg::PointField::FLOAT32, "z", 1,
+        sensor_msgs::msg::PointField::FLOAT32, "rgb", 1,
+        sensor_msgs::msg::PointField::FLOAT32);
 
     modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
 
@@ -972,17 +1006,17 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       }
     }
 
-    points_publisher_.publish(msg);
+    points_publisher_->publish(msg);
   }
 
   void publishImu(
-      const api::MotionData &data, std::uint32_t seq, ros::Time stamp) {
-    if (pub_imu_.getNumSubscribers() == 0)
+      const api::MotionData &data, std::uint32_t seq, rclcpp::Time stamp) {
+    if (pub_imu_->get_subscription_count() == 0)
       return;
 
-    sensor_msgs::Imu msg;
+    sensor_msgs::msg::Imu msg;
 
-    msg.header.seq = seq;
+    // msg.header.seq = seq;
     msg.header.stamp = stamp;
     msg.header.frame_id = imu_frame_id_;
 
@@ -1020,7 +1054,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     msg.angular_velocity_covariance[7] = 0;
     msg.angular_velocity_covariance[8] = 0;
 
-    pub_imu_.publish(msg);
+    pub_imu_->publish(msg);
   }
 
   void timestampAlign() {
@@ -1082,10 +1116,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     timestampAlign();
 
     for (int i = 0; i < imu_align_.size(); i++) {
-      sensor_msgs::Imu msg;
+      sensor_msgs::msg::Imu msg;
 
-      msg.header.seq = imu_sync_count_;
-      ros::Time stamp = checkUpImuTimeStamp(imu_align_[i].timestamp);
+      // msg.header.seq = imu_sync_count_;
+      rclcpp::Time stamp = checkUpImuTimeStamp(imu_align_[i].timestamp);
       msg.header.stamp = stamp;
       msg.header.frame_id = imu_frame_id_;
 
@@ -1123,7 +1157,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       msg.angular_velocity_covariance[7] = 0;
       msg.angular_velocity_covariance[8] = 0;
 
-      pub_imu_.publish(msg);
+      pub_imu_->publish(msg);
 
       publishTemperature(imu_align_[i].temperature, imu_sync_count_, stamp);
 
@@ -1132,16 +1166,16 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   }
 
   void publishTemperature(
-    float temperature, std::uint32_t seq, ros::Time stamp) {
-    if (pub_temperature_.getNumSubscribers() == 0)
+    float temperature, std::uint32_t seq, rclcpp::Time stamp) {
+    if (pub_temperature_->get_subscription_count() == 0)
       return;
-    sensor_msgs::Temperature msg;
-    msg.header.seq = seq;
+    sensor_msgs::msg::Temperature msg;
+    // msg.header.seq = seq;
     msg.header.stamp = stamp;
     msg.header.frame_id = temperature_frame_id_;
     msg.temperature = temperature;
     msg.variance = 0;
-    pub_temperature_.publish(msg);
+    pub_temperature_->publish(msg);
   }
 
  private:
@@ -1158,7 +1192,8 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     model_ = api_->GetModel();
     if (model_ == Model::STANDARD2 ||
         model_ == Model::STANDARD210A || model_ == Model::STANDARD200B) {
-      private_nh_.getParamCached("standard2/request_index", request_index);
+      node_->declare_parameter("standard2/request_index", request_index);
+      node_->get_parameter("standard2/request_index", request_index);
       switch (request_index) {
         case 0:
         case 4:
@@ -1178,24 +1213,28 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       }
     }
     if (model_ == Model::STANDARD) {
-      private_nh_.getParamCached("standard/request_index", request_index);
+      node_->declare_parameter("standard/request_index", request_index);
+      node_->get_parameter("standard/request_index", request_index);
       frame_rate_ = api_->GetOptionValue(Option::FRAME_RATE);
     }
 
     std::int32_t process_mode = 0;
     if (model_ == Model::STANDARD2 ||
         model_ == Model::STANDARD210A || model_ == Model::STANDARD200B) {
-      private_nh_.getParamCached("standard2/imu_process_mode", process_mode);
+      node_->declare_parameter("standard2/imu_process_mode", process_mode);
+      node_->get_parameter("standard2/imu_process_mode", process_mode);
       api_->EnableProcessMode(process_mode);
     }
 
-    NODELET_FATAL_COND(m <= 0, "No MYNT EYE devices :(");
+    // NODELET_FATAL_COND(m <= 0, "No MYNT EYE devices :(");
+    if (m<=0)
+      RCLCPP_FATAL(node_->get_logger(), "No MYNT EYE devices :(");
     if (m <= 1) {
-      NODELET_INFO_STREAM("Only one stream request, select index: 0");
+      RCLCPP_INFO_STREAM(node_->get_logger(), "Only one stream request, select index: 0");
       api_->ConfigStreamRequest(requests[0]);
     } else {
       if (request_index >= m) {
-        NODELET_WARN_STREAM("Resquest_index out of range");
+        RCLCPP_WARN_STREAM(node_->get_logger(), "Resquest_index out of range");
         api_->ConfigStreamRequest(requests[0]);
       } else {
         api_->ConfigStreamRequest(requests[request_index]);
@@ -1206,30 +1245,39 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   }
 
   std::shared_ptr<Device> selectDevice() {
-    NODELET_INFO_STREAM("Detecting MYNT EYE devices");
+    RCLCPP_INFO_STREAM(node_->get_logger(), "Detecting MYNT EYE devices");
 
     Context context;
     auto &&devices = context.devices();
 
     size_t n = devices.size();
-    NODELET_FATAL_COND(n <= 0, "No MYNT EYE devices :(");
+    // NODELET_FATAL_COND(n <= 0, "No MYNT EYE devices :(");
+    if (n<=0)
+      RCLCPP_FATAL(node_->get_logger(), "No MYNT EYE devices :(");
 
-    NODELET_INFO_STREAM("MYNT EYE devices:");
+    RCLCPP_INFO_STREAM(node_->get_logger(), "MYNT EYE devices:");
     for (size_t i = 0; i < n; i++) {
       auto &&device = devices[i];
       auto &&name = device->GetInfo(Info::DEVICE_NAME);
       auto &&serial_number = device->GetInfo(Info::SERIAL_NUMBER);
-      NODELET_INFO_STREAM("  index: " << i << ", name: " <<
+      RCLCPP_INFO_STREAM(node_->get_logger(), "  index: " << i << ", name: " <<
           name << ", serial number: " << serial_number);
     }
 
     bool is_multiple = false;
-    private_nh_.getParam("is_multiple", is_multiple);
+    node_->declare_parameter("is_multiple", is_multiple);
+    node_->get_parameter("is_multiple", is_multiple);
     if (is_multiple) {
       std::string sn;
-      private_nh_.getParam("serial_number", sn);
-      NODELET_FATAL_COND(sn.empty(), "Must set serial_number "
+      node_->declare_parameter("serial_number", sn);
+      node_->get_parameter("serial_number", sn);
+      if (sn.empty()) {
+
+        RCLCPP_FATAL(node_->get_logger(), "Must set serial_number "
           "in mynteye_1.launch and mynteye_2.launch.");
+      }
+      // NODELET_FATAL_COND(sn.empty(), "Must set serial_number "
+      //     "in mynteye_1.launch and mynteye_2.launch.");
 
       for (size_t i = 0; i < n; i++) {
         auto &&device = devices[i];
@@ -1237,21 +1285,24 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         auto &&serial_number = device->GetInfo(Info::SERIAL_NUMBER);
         if (sn == serial_number)
           return device;
-        NODELET_FATAL_COND(i == (n - 1), "No corresponding device was found,"
+
+        if (i == n - 1) {
+          RCLCPP_FATAL(node_->get_logger(), "No corresponding device was found,"
             " check the serial_number configuration. ");
+        }
       }
     } else {
       if (n <= 1) {
-        NODELET_INFO_STREAM("Only one MYNT EYE device, select index: 0");
+        RCLCPP_INFO_STREAM(node_->get_logger(), "Only one MYNT EYE device, select index: 0");
         return devices[0];
       } else {
         while (true) {
           size_t i;
-          NODELET_INFO_STREAM(
+          RCLCPP_INFO_STREAM(node_->get_logger(), 
               "There are " << n << " MYNT EYE devices, select index: ");
           std::cin >> i;
           if (i >= n) {
-            NODELET_WARN_STREAM("Index out of range :(");
+            RCLCPP_WARN_STREAM(node_->get_logger(), "Index out of range :(");
             continue;
           }
           return devices[i];
@@ -1306,20 +1357,20 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
 
   void publishMesh() {
     mesh_msg_.header.frame_id = base_frame_id_;
-    mesh_msg_.header.stamp = ros::Time::now();
-    mesh_msg_.type = visualization_msgs::Marker::MESH_RESOURCE;
+    mesh_msg_.header.stamp = node_->get_clock()->now();
+    mesh_msg_.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
     geometry_msgs::Quaternion q;
-    private_nh_.getParamCached("model_rotation_x",
+    node_->get_parameter("model_rotation_x",
         mesh_rotation_x);
-    private_nh_.getParamCached("model_rotation_y",
+    node_->get_parameter("model_rotation_y",
         mesh_rotation_y);
-    private_nh_.getParamCached("model_rotation_z",
+    node_->get_parameter("model_rotation_z",
         mesh_rotation_z);
-    private_nh_.getParamCached("model_position_x",
+    node_->get_parameter("model_position_x",
         mesh_position_x);
-    private_nh_.getParamCached("model_position_y",
+    node_->get_parameter("model_position_y",
         mesh_position_y);
-    private_nh_.getParamCached("model_position_z",
+    node_->get_parameter("model_position_z",
         mesh_position_z);
 
     q = tf::createQuaternionMsgFromRollPitchYaw(
@@ -1343,7 +1394,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     mesh_msg_.scale.y = 0.003;
     mesh_msg_.scale.z = 0.003;
 
-    mesh_msg_.action = visualization_msgs::Marker::ADD;
+    mesh_msg_.action = visualization_msgs::msg::Marker::ADD;
     mesh_msg_.color.a = 0.5;  // Don't forget to set the alpha!
     mesh_msg_.color.r = 1.0;
     mesh_msg_.color.g = 1.0;
@@ -1352,12 +1403,12 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     // embedded material / colour
     // mesh_msg_.mesh_use_embedded_materials = true;
     if (!mesh_msg_.mesh_resource.empty())
-      pub_mesh_.publish(mesh_msg_);  // publish stamped mesh
+      pub_mesh_->publish(mesh_msg_);  // publish stamped mesh
   }
 
 
   void computeRectTransforms() {
-    ROS_ASSERT(api_);
+    assertm(api_, "");
     auto in_left_base = api_->GetIntrinsicsBase(Stream::LEFT);
     auto in_right_base = api_->GetIntrinsicsBase(Stream::RIGHT);
     is_intrinsics_enable_ = in_left_base && in_right_base;
@@ -1400,21 +1451,21 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         M1, D1, M2, D2, size, R, T, left_r_, right_r_, left_p_, right_p_, q_,
         cv::CALIB_ZERO_DISPARITY, 0, size, &left_roi_, &right_roi_);
 
-    NODELET_DEBUG_STREAM("left_r: " << left_r_);
-    NODELET_DEBUG_STREAM("right_r: " << right_r_);
-    NODELET_DEBUG_STREAM("left_p: " << left_p_);
-    NODELET_DEBUG_STREAM("right_p: " << right_p_);
-    NODELET_DEBUG_STREAM("q: " << q_);
+    RCLCPP_DEBUG_STREAM(node_->get_logger(), "left_r: " << left_r_);
+    RCLCPP_DEBUG_STREAM(node_->get_logger(), "right_r: " << right_r_);
+    RCLCPP_DEBUG_STREAM(node_->get_logger(), "left_p: " << left_p_);
+    RCLCPP_DEBUG_STREAM(node_->get_logger(), "right_p: " << right_p_);
+    RCLCPP_DEBUG_STREAM(node_->get_logger(), "q: " << q_);
   }
 
-  sensor_msgs::CameraInfoPtr getCameraInfo(const Stream &stream) {
+  sensor_msgs::msg::CameraInfo::SharedPtr getCameraInfo(const Stream &stream) {
     if (camera_info_ptrs_.find(stream) != camera_info_ptrs_.end()) {
       return camera_info_ptrs_[stream];
     }
-    ROS_ASSERT(api_);
+    assertm(api_, "");
     // http://docs.ros.org/kinetic/api/sensor_msgs/html/msg/CameraInfo.html
-    sensor_msgs::CameraInfo *camera_info = new sensor_msgs::CameraInfo();
-    camera_info_ptrs_[stream] = sensor_msgs::CameraInfoPtr(camera_info);
+    sensor_msgs::msg::CameraInfo *camera_info = new sensor_msgs::msg::CameraInfo();
+    camera_info_ptrs_[stream] = sensor_msgs::msg::CameraInfo::SharedPtr(camera_info);
     auto info_pair = api_->GetCameraROSMsgInfoPair();
     camera_info->width = info_pair->left.width;
     camera_info->height = info_pair->left.height;
@@ -1424,12 +1475,12 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         if (info_pair->right.distortion_model == "KANNALA_BRANDT") {
           camera_info->distortion_model = "KANNALA_BRANDT";
           for (size_t i = 0; i < 5; i++) {
-            camera_info->D.push_back(info_pair->right.D[i]);
+            camera_info->d.push_back(info_pair->right.D[i]);
           }
         } else if (info_pair->right.distortion_model == "PINHOLE") {
           camera_info->distortion_model = "plumb_bob";
           for (size_t i = 0; i < 5; i++) {
-            camera_info->D.push_back(info_pair->right.D[i]);
+            camera_info->d.push_back(info_pair->right.D[i]);
           }
         }
         for (size_t i = 0; i < 9; i++) {
@@ -1445,7 +1496,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         if (info_pair->left.distortion_model == "KANNALA_BRANDT") {
           // compatible laserscan
           bool is_laserscan = false;
-          private_nh_.getParamCached("is_laserscan", is_laserscan);
+          node_->get_parameter("is_laserscan", is_laserscan);
           if (!is_laserscan) {
             camera_info->distortion_model = "KANNALA_BRANDT";
             for (size_t i = 0; i < 5; i++) {
@@ -1478,10 +1529,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   }
 
   void publishStaticTransforms() {
-    ros::Time tf_stamp = ros::Time::now();
+    rclcpp::Time tf_stamp = node_->get_clock()->now();
 
     // The left frame is used as the base frame.
-    geometry_msgs::TransformStamped b2l_msg;
+    geometry_msgs::msg::TransformStamped b2l_msg;
     b2l_msg.header.stamp = tf_stamp;
     b2l_msg.header.frame_id = base_frame_id_;
     b2l_msg.child_frame_id = frame_ids_[Stream::LEFT];
@@ -1492,7 +1543,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     b2l_msg.transform.rotation.y = 0;
     b2l_msg.transform.rotation.z = 0;
     b2l_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(b2l_msg);
+    static_tf_broadcaster_->sendTransform(b2l_msg);
 
     // Transform left frame to right frame
     auto &&l2r_ex = api_->GetExtrinsics(Stream::LEFT, Stream::RIGHT);
@@ -1502,7 +1553,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
         l2r_ex.rotation[1][0], l2r_ex.rotation[1][1], l2r_ex.rotation[1][2],
         l2r_ex.rotation[2][0], l2r_ex.rotation[2][1], l2r_ex.rotation[2][2]);
     l2r_r.getRotation(l2r_q);
-    geometry_msgs::TransformStamped l2r_msg;
+    geometry_msgs::msg::TransformStamped l2r_msg;
     l2r_msg.header.stamp = tf_stamp;
     l2r_msg.header.frame_id = frame_ids_[Stream::LEFT];
     l2r_msg.child_frame_id = frame_ids_[Stream::RIGHT];
@@ -1513,10 +1564,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     l2r_msg.transform.rotation.y = l2r_q.getY();
     l2r_msg.transform.rotation.z = l2r_q.getZ();
     l2r_msg.transform.rotation.w = l2r_q.getW();
-    static_tf_broadcaster_.sendTransform(l2r_msg);
+    static_tf_broadcaster_->sendTransform(l2r_msg);
 
     // Transform left frame to left_rect frame
-    geometry_msgs::TransformStamped l2rect_msg;
+    geometry_msgs::msg::TransformStamped l2rect_msg;
     l2rect_msg.header.stamp = tf_stamp;
     l2rect_msg.header.frame_id = frame_ids_[Stream::LEFT];
     l2rect_msg.child_frame_id = frame_ids_[Stream::LEFT_RECTIFIED];
@@ -1527,10 +1578,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     l2rect_msg.transform.rotation.y = 0;
     l2rect_msg.transform.rotation.z = 0;
     l2rect_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(l2rect_msg);
+    static_tf_broadcaster_->sendTransform(l2rect_msg);
 
     // Transform right frame to right_rect frame
-    geometry_msgs::TransformStamped r2rect_msg;
+    geometry_msgs::msg::TransformStamped r2rect_msg;
     r2rect_msg.header.stamp = tf_stamp;
     r2rect_msg.header.frame_id = frame_ids_[Stream::RIGHT];
     r2rect_msg.child_frame_id = frame_ids_[Stream::RIGHT_RECTIFIED];
@@ -1541,10 +1592,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     r2rect_msg.transform.rotation.y = 0;
     r2rect_msg.transform.rotation.z = 0;
     r2rect_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(r2rect_msg);
+    static_tf_broadcaster_->sendTransform(r2rect_msg);
 
     // Transform left frame to disparity frame
-    geometry_msgs::TransformStamped l2disp_msg;
+    geometry_msgs::msg::TransformStamped l2disp_msg;
     l2disp_msg.header.stamp = tf_stamp;
     l2disp_msg.header.frame_id = frame_ids_[Stream::LEFT];
     l2disp_msg.child_frame_id = frame_ids_[Stream::DISPARITY];
@@ -1555,10 +1606,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     l2disp_msg.transform.rotation.y = 0;
     l2disp_msg.transform.rotation.z = 0;
     l2disp_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(l2disp_msg);
+    static_tf_broadcaster_->sendTransform(l2disp_msg);
 
     // Transform disparity frame to disparity_norm frame
-    geometry_msgs::TransformStamped disp2norm_msg;
+    geometry_msgs::msg::TransformStamped disp2norm_msg;
     disp2norm_msg.header.stamp = tf_stamp;
     disp2norm_msg.header.frame_id = frame_ids_[Stream::DISPARITY];
     disp2norm_msg.child_frame_id = frame_ids_[Stream::DISPARITY_NORMALIZED];
@@ -1569,10 +1620,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     disp2norm_msg.transform.rotation.y = 0;
     disp2norm_msg.transform.rotation.z = 0;
     disp2norm_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(disp2norm_msg);
+    static_tf_broadcaster_->sendTransform(disp2norm_msg);
 
     // Transform left frame to depth frame
-    geometry_msgs::TransformStamped b2d_msg;
+    geometry_msgs::msg::TransformStamped b2d_msg;
     b2d_msg.header.stamp = tf_stamp;
     b2d_msg.header.frame_id = frame_ids_[Stream::LEFT];
     b2d_msg.child_frame_id = frame_ids_[Stream::DEPTH];
@@ -1583,10 +1634,10 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     b2d_msg.transform.rotation.y = 0;
     b2d_msg.transform.rotation.z = 0;
     b2d_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(b2d_msg);
+    static_tf_broadcaster_->sendTransform(b2d_msg);
 
     // Transform left frame to points frame
-    geometry_msgs::TransformStamped b2p_msg;
+    geometry_msgs::msg::TransformStamped b2p_msg;
     b2p_msg.header.stamp = tf_stamp;
     b2p_msg.header.frame_id = frame_ids_[Stream::LEFT];
     b2p_msg.child_frame_id = frame_ids_[Stream::POINTS];
@@ -1597,11 +1648,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
     b2p_msg.transform.rotation.y = 0;
     b2p_msg.transform.rotation.z = 0;
     b2p_msg.transform.rotation.w = 1;
-    static_tf_broadcaster_.sendTransform(b2p_msg);
+    static_tf_broadcaster_->sendTransform(b2p_msg);
 
     // Transform left frame to imu frame
     auto &&l2i_ex = api_->GetMotionExtrinsics(Stream::LEFT);
-    geometry_msgs::TransformStamped l2i_msg;
+    geometry_msgs::msg::TransformStamped l2i_msg;
     l2i_msg.header.stamp = tf_stamp;
     l2i_msg.header.frame_id = frame_ids_[Stream::LEFT];
     l2i_msg.child_frame_id = imu_frame_id_;
@@ -1640,11 +1691,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
       l2i_msg.transform.rotation.z = l2i_q.getZ();
       l2i_msg.transform.rotation.w = l2i_q.getW();
     }
-    static_tf_broadcaster_.sendTransform(l2i_msg);
+    static_tf_broadcaster_->sendTransform(l2i_msg);
   }
 
-  ros::NodeHandle nh_;
-  ros::NodeHandle private_nh_;
+  // ros::NodeHandle nh_;
+  // ros::NodeHandle private_nh_;
 
   pthread_mutex_t mutex_data_;
 
@@ -1655,7 +1706,7 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   //   DISPARITY, DISPARITY_NORMALIZED,
   //   DEPTH
   std::map<Stream, image_transport::CameraPublisher> camera_publishers_;
-  std::map<Stream, sensor_msgs::CameraInfoPtr> camera_info_ptrs_;
+  std::map<Stream, sensor_msgs::msg::CameraInfo::SharedPtr> camera_info_ptrs_;
   std::map<Stream, std::string> camera_encodings_;
 
   // image: LEFT_RECTIFIED, RIGHT_RECTIFIED, DISPARITY, DISPARITY_NORMALIZED,
@@ -1667,17 +1718,18 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   std::map<Stream, image_transport::Publisher> mono_publishers_;
 
   // pointcloud: POINTS
-  ros::Publisher points_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points_publisher_;
 
-  ros::Publisher pub_imu_;
-  ros::Publisher pub_temperature_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
+  rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr pub_temperature_;
 
-  ros::Publisher pub_mesh_;  // < The publisher for camera mesh.
-  visualization_msgs::Marker mesh_msg_;  // < Mesh message.
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_mesh_;  // < The publisher for camera mesh.
+  visualization_msgs::msg::Marker mesh_msg_;  // < Mesh message.
 
-  tf2_ros::StaticTransformBroadcaster static_tf_broadcaster_;
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
 
-  ros::ServiceServer get_info_service_;
+  // ros::ServiceServer get_info_service_;
+  ::rclcpp::Service<mynt_eye_ros_msgs::srv::GetInfo>::SharedPtr get_info_service_;
 
   // node params
 
@@ -1728,9 +1780,11 @@ class ROSWrapperNodelet : public nodelet::Nodelet {
   std::vector<int64_t> right_timestamps;
 
   std::uint64_t unit_hard_time = std::numeric_limits<std::uint32_t>::max();
+
+  rclcpp::Node::SharedPtr node_;
 };
 
 MYNTEYE_END_NAMESPACE
 
-#include <pluginlib/class_list_macros.h>  // NOLINT
-PLUGINLIB_EXPORT_CLASS(mynteye::ROSWrapperNodelet, nodelet::Nodelet);
+// #include <pluginlib/class_list_macros.h>  // NOLINT
+// PLUGINLIB_EXPORT_CLASS(mynteye::ROSWrapperNodelet, nodelet::Nodelet);
