@@ -26,6 +26,7 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 
 #include <opencv2/calib3d/calib3d.hpp>
+#include <eigen3/Eigen/Dense>
 
 #include <mynt_eye_ros_msgs/srv/get_info.hpp>
 #define _USE_MATH_DEFINES
@@ -73,7 +74,7 @@ class ROSWrapperNodelet {
   skip_tmp_left_tag(0),
   skip_tmp_right_tag(0),
   node_(node) {
-    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+    static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
     unit_hard_time *= 10;
   }
 
@@ -1359,7 +1360,7 @@ class ROSWrapperNodelet {
     mesh_msg_.header.frame_id = base_frame_id_;
     mesh_msg_.header.stamp = node_->get_clock()->now();
     mesh_msg_.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
-    geometry_msgs::Quaternion q;
+    // geometry_msgs::Quaternion q;
     node_->get_parameter("model_rotation_x",
         mesh_rotation_x);
     node_->get_parameter("model_rotation_y",
@@ -1373,16 +1374,20 @@ class ROSWrapperNodelet {
     node_->get_parameter("model_position_z",
         mesh_position_z);
 
-    q = tf::createQuaternionMsgFromRollPitchYaw(
-        mesh_rotation_x,
-        mesh_rotation_y,
-        mesh_rotation_z);
+    Eigen::Quaternionf q;
+    q = Eigen::AngleAxisf(mesh_rotation_x, Eigen::Vector3f::UnitX())
+        * Eigen::AngleAxisf(mesh_rotation_x, Eigen::Vector3f::UnitY())
+        * Eigen::AngleAxisf(mesh_rotation_x, Eigen::Vector3f::UnitZ());
+    // q = tf::createQuaternionMsgFromRollPitchYaw(
+    //     mesh_rotation_x,
+    //     mesh_rotation_y,
+    //     mesh_rotation_z);
 
     // fill orientation
-    mesh_msg_.pose.orientation.x = q.x;
-    mesh_msg_.pose.orientation.y = q.y;
-    mesh_msg_.pose.orientation.z = q.z;
-    mesh_msg_.pose.orientation.w = q.w;
+    mesh_msg_.pose.orientation.x = q.x();
+    mesh_msg_.pose.orientation.y = q.y();
+    mesh_msg_.pose.orientation.z = q.z();
+    mesh_msg_.pose.orientation.w = q.w();
 
     // fill position
     mesh_msg_.pose.position.x = mesh_position_x;
@@ -1484,13 +1489,13 @@ class ROSWrapperNodelet {
           }
         }
         for (size_t i = 0; i < 9; i++) {
-          camera_info->K.at(i) = info_pair->right.K[i];
+          camera_info->k.at(i) = info_pair->right.K[i];
         }
         for (size_t i = 0; i < 9; i++) {
-          camera_info->R.at(i) = info_pair->right.R[i];
+          camera_info->r.at(i) = info_pair->right.R[i];
         }
         for (size_t i = 0; i < 12; i++) {
-          camera_info->P.at(i) = info_pair->right.P[i];
+          camera_info->p.at(i) = info_pair->right.P[i];
         }
       } else {
         if (info_pair->left.distortion_model == "KANNALA_BRANDT") {
@@ -1500,28 +1505,28 @@ class ROSWrapperNodelet {
           if (!is_laserscan) {
             camera_info->distortion_model = "KANNALA_BRANDT";
             for (size_t i = 0; i < 5; i++) {
-              camera_info->D.push_back(info_pair->left.D[i]);
+              camera_info->d.push_back(info_pair->left.D[i]);
             }
           } else {
             camera_info->distortion_model = "KANNALA_BRANDT";
             for (size_t i = 0; i < 4; i++) {
-              camera_info->D.push_back(0.0);
+              camera_info->d.push_back(0.0);
             }
           }
         } else if (info_pair->left.distortion_model == "PINHOLE") {
           camera_info->distortion_model = "plumb_bob";
           for (size_t i = 0; i < 5; i++) {
-            camera_info->D.push_back(info_pair->left.D[i]);
+            camera_info->d.push_back(info_pair->left.D[i]);
           }
         }
         for (size_t i = 0; i < 9; i++) {
-          camera_info->K.at(i) = info_pair->left.K[i];
+          camera_info->k.at(i) = info_pair->left.K[i];
         }
         for (size_t i = 0; i < 9; i++) {
-          camera_info->R.at(i) = info_pair->left.R[i];
+          camera_info->r.at(i) = info_pair->left.R[i];
         }
         for (size_t i = 0; i < 12; i++) {
-          camera_info->P.at(i) = info_pair->left.P[i];
+          camera_info->p.at(i) = info_pair->left.P[i];
         }
       }
     }
@@ -1547,12 +1552,12 @@ class ROSWrapperNodelet {
 
     // Transform left frame to right frame
     auto &&l2r_ex = api_->GetExtrinsics(Stream::LEFT, Stream::RIGHT);
-    tf::Quaternion l2r_q;
-    tf::Matrix3x3 l2r_r(
-        l2r_ex.rotation[0][0], l2r_ex.rotation[0][1], l2r_ex.rotation[0][2],
+    Eigen::Matrix3f l2r_r(3, 3);
+    l2r_r << l2r_ex.rotation[0][0], l2r_ex.rotation[0][1], l2r_ex.rotation[0][2],
         l2r_ex.rotation[1][0], l2r_ex.rotation[1][1], l2r_ex.rotation[1][2],
-        l2r_ex.rotation[2][0], l2r_ex.rotation[2][1], l2r_ex.rotation[2][2]);
-    l2r_r.getRotation(l2r_q);
+        l2r_ex.rotation[2][0], l2r_ex.rotation[2][1], l2r_ex.rotation[2][2];
+    Eigen::Quaternionf l2r_q(l2r_r);
+
     geometry_msgs::msg::TransformStamped l2r_msg;
     l2r_msg.header.stamp = tf_stamp;
     l2r_msg.header.frame_id = frame_ids_[Stream::LEFT];
@@ -1560,10 +1565,10 @@ class ROSWrapperNodelet {
     l2r_msg.transform.translation.x = l2r_ex.translation[0] / 1000;
     l2r_msg.transform.translation.y = l2r_ex.translation[1] / 1000;
     l2r_msg.transform.translation.z = l2r_ex.translation[2] / 1000;
-    l2r_msg.transform.rotation.x = l2r_q.getX();
-    l2r_msg.transform.rotation.y = l2r_q.getY();
-    l2r_msg.transform.rotation.z = l2r_q.getZ();
-    l2r_msg.transform.rotation.w = l2r_q.getW();
+    l2r_msg.transform.rotation.x = l2r_q.x();
+    l2r_msg.transform.rotation.y = l2r_q.y();
+    l2r_msg.transform.rotation.z = l2r_q.z();
+    l2r_msg.transform.rotation.w = l2r_q.w();
     static_tf_broadcaster_->sendTransform(l2r_msg);
 
     // Transform left frame to left_rect frame
@@ -1680,16 +1685,17 @@ class ROSWrapperNodelet {
       l2i_msg.transform.rotation.z = 0;
       l2i_msg.transform.rotation.w = 1;
     } else {
-      tf::Quaternion l2i_q;
-      tf::Matrix3x3 l2i_r(
+      
+      Eigen::Matrix3f l2i_r(3,3);
+      l2i_r << 
           l2i_ex.rotation[0][0], l2i_ex.rotation[0][1], l2i_ex.rotation[0][2],
           l2i_ex.rotation[1][0], l2i_ex.rotation[1][1], l2i_ex.rotation[1][2],
-          l2i_ex.rotation[2][0], l2i_ex.rotation[2][1], l2i_ex.rotation[2][2]);
-      l2i_r.getRotation(l2i_q);
-      l2i_msg.transform.rotation.x = l2i_q.getX();
-      l2i_msg.transform.rotation.y = l2i_q.getY();
-      l2i_msg.transform.rotation.z = l2i_q.getZ();
-      l2i_msg.transform.rotation.w = l2i_q.getW();
+          l2i_ex.rotation[2][0], l2i_ex.rotation[2][1], l2i_ex.rotation[2][2];
+      Eigen::Quaternionf l2i_q(l2i_r);
+      l2i_msg.transform.rotation.x = l2i_q.x();
+      l2i_msg.transform.rotation.y = l2i_q.y();
+      l2i_msg.transform.rotation.z = l2i_q.z();
+      l2i_msg.transform.rotation.w = l2i_q.w();
     }
     static_tf_broadcaster_->sendTransform(l2i_msg);
   }
