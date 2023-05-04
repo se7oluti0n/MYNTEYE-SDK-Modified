@@ -37,6 +37,7 @@ find_package(mynt_eye_ros_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
+
 find_package(Boost REQUIRED COMPONENTS filesystem program_options system)
 include_directories(${Boost_INCLUDE_DIRS})
 
@@ -90,17 +91,20 @@ set(LINK_LIBS
   mynteye
 )
 
-add_library(mynteye_wrapper src/wrapper_nodelet.cc)
-target_link_libraries(mynteye_wrapper ${LINK_LIBS} )
+# add_library(mynteye_wrapper src/wrapper_nodelet.h src/wrapper_nodelet.cc)
+# target_link_libraries(mynteye_wrapper ${LINK_LIBS} )
 
 
-ament_target_dependencies(mynteye_wrapper
+# ament_target_dependencies(mynteye_wrapper
+#   ${dependencies}
+# )
+
+add_executable(mynteye_wrapper_node src/wrapper_node.cc src/wrapper_nodelet.cc)
+target_link_libraries(mynteye_wrapper_node ${LINK_LIBS})
+
+ament_target_dependencies(mynteye_wrapper_node
   ${dependencies}
 )
-
-add_executable(mynteye_wrapper_node src/wrapper_node.cc)
-target_link_libraries(mynteye_wrapper_node mynteye_wrapper ${LINK_LIBS})
-
 
 # install
 
@@ -109,17 +113,13 @@ target_link_libraries(mynteye_wrapper_node mynteye_wrapper ${LINK_LIBS})
 #  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 #)
 
-install(TARGETS mynteye_wrapper mynteye_wrapper_node
+install(TARGETS mynteye_wrapper_node
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY launch/
-  DESTINATION share/${PROJECT_NAME}/
-)
-
-install(DIRECTORY rviz/
+install(DIRECTORY rviz config launch
   DESTINATION share/${PROJECT_NAME}/
 )
 

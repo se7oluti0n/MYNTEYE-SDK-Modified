@@ -11,37 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <rclcpp/rclcpp.hpp>
-
-#include <cv_bridge/cv_bridge.h>
-#include <image_transport/image_transport.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/temperature.hpp>
-#include <sensor_msgs/image_encodings.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
-#include <sensor_msgs/msg/point_field.hpp>
-
-#include <visualization_msgs/msg/marker.hpp>
-#include <tf2_ros/static_transform_broadcaster.h>
-
-#include <opencv2/calib3d/calib3d.hpp>
-#include <eigen3/Eigen/Dense>
-
-#include <mynt_eye_ros_msgs/srv/get_info.hpp>
-#define _USE_MATH_DEFINES
-#include <cmath>
-#include <map>
-#include <string>
-#include <cassert>
- 
-// Use (void) to silence unused warnings.
-#define assertm(exp, msg) assert(((void)msg, exp))
-
-#include "mynteye/logger.h"
-#include "mynteye/api/api.h"
-#include "mynteye/device/context.h"
-#include "mynteye/device/device.h"
+#include "wrapper_nodelet.h"
 #define CONFIGURU_IMPLEMENTATION 1
 #include "configuru.hpp"
 using namespace configuru;  // NOLINT
@@ -61,9 +31,8 @@ inline double compute_time(const double end, const double start) {
   return end - start;
 }
 
-class ROSWrapperNodelet {
- public:
-  ROSWrapperNodelet(rclcpp::Node::SharedPtr &node) :
+
+  ROSWrapperNodelet::ROSWrapperNodelet(rclcpp::Node::SharedPtr &node) :
   mesh_position_x(0.),
   mesh_position_y(-0.176),
   mesh_position_z(0.),
@@ -78,7 +47,7 @@ class ROSWrapperNodelet {
     unit_hard_time *= 10;
   }
 
-  ~ROSWrapperNodelet() {
+  ROSWrapperNodelet::~ROSWrapperNodelet() {
     // std::cout << __func__ << std::endl;
     if (api_) {
       api_->Stop(Source::ALL);
@@ -120,7 +89,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  rclcpp::Time hardTimeToSoftTime(std::uint64_t _hard_time) {
+  rclcpp::Time ROSWrapperNodelet::hardTimeToSoftTime(std::uint64_t _hard_time) {
     static bool isInited = false;
     static double soft_time_begin(0);
     static std::uint64_t hard_time_begin(0);
@@ -156,24 +125,9 @@ class ROSWrapperNodelet {
   //       static_cast<double>(_hard_time - hard_time_begin) * 0.000001f));
   // }
 
-  inline bool is_overflow(std::uint64_t now,
-      std::uint64_t pre) {
+  
 
-    return (now < pre) && ((pre - now) > (unit_hard_time / 2));
-  }
-
-  inline bool is_repeated(std::uint64_t now,
-      std::uint64_t pre) {
-    return now == pre;
-  }
-
-  inline bool is_abnormal(std::uint32_t now,
-      std::uint32_t pre) {
-
-    return (now < pre) && ((pre - now) < (unit_hard_time / 4));
-  }
-
-  rclcpp::Time checkUpTimeStamp(std::uint64_t _hard_time,
+  rclcpp::Time ROSWrapperNodelet::checkUpTimeStamp(std::uint64_t _hard_time,
       const Stream &stream) {
     static std::map<Stream, std::uint64_t> hard_time_now;
     static std::map<Stream, std::uint64_t> acc;
@@ -188,7 +142,7 @@ class ROSWrapperNodelet {
         acc[stream] * unit_hard_time + _hard_time);
   }
 
-  rclcpp::Time checkUpImuTimeStamp(std::uint64_t _hard_time) {
+  rclcpp::Time ROSWrapperNodelet::checkUpImuTimeStamp(std::uint64_t _hard_time) {
     static std::uint64_t hard_time_now(0), acc(0);
 
     if (is_overflow(_hard_time, hard_time_now)) {
@@ -201,7 +155,7 @@ class ROSWrapperNodelet {
         acc * unit_hard_time + _hard_time);
   }
 
-  void onInit() {
+  void ROSWrapperNodelet::onInit() {
     // nh_ = getMTNodeHandle();
     // private_nh_ = getMTPrivateNodeHandle();
 
@@ -492,7 +446,7 @@ class ROSWrapperNodelet {
     // }
   }
 
-  bool getInfo(
+  bool ROSWrapperNodelet::getInfo(
       const mynt_eye_ros_msgs::srv::GetInfo::Request::SharedPtr req,     // NOLINT
       mynt_eye_ros_msgs::srv::GetInfo::Response::SharedPtr res) {  // NOLINT
     using Request = mynt_eye_ros_msgs::srv::GetInfo::Request;
@@ -674,7 +628,7 @@ class ROSWrapperNodelet {
     return true;
   }
 
-  void publishData(
+  void ROSWrapperNodelet::publishData(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
       rclcpp::Time stamp) {
     if (stream == Stream::LEFT || stream == Stream::RIGHT) {
@@ -690,7 +644,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  int getStreamSubscribers(const Stream &stream) {
+  int ROSWrapperNodelet::getStreamSubscribers(const Stream &stream) {
     if (stream == Stream::POINTS) {
       return points_publisher_->get_subscription_count();
     }
@@ -700,7 +654,7 @@ class ROSWrapperNodelet {
     return -1;
   }
 
-  void publishOthers(const Stream &stream) {
+  void ROSWrapperNodelet::publishOthers(const Stream &stream) {
     if ((getStreamSubscribers(stream) > 0 && !is_published_[stream]) ||
         mono_publishers_[stream].getNumSubscribers() > 0) {
       api_->EnableStreamData(stream);
@@ -729,7 +683,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  void publishTopics() {
+  void ROSWrapperNodelet::publishTopics() {
     publishMesh();
     if ((camera_publishers_[Stream::LEFT].getNumSubscribers() > 0 ||
         mono_publishers_[Stream::LEFT].getNumSubscribers() > 0) &&
@@ -893,7 +847,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  void publishCamera(
+  void ROSWrapperNodelet::publishCamera(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
       rclcpp::Time stamp) {
     // if (camera_publishers_[stream]->get_subscription_count() == 0)
@@ -936,7 +890,7 @@ class ROSWrapperNodelet {
   }
   */
 
-  void publishMono(
+  void ROSWrapperNodelet::publishMono(
       const Stream &stream, const api::StreamData &data, std::uint32_t seq,
       rclcpp::Time stamp) {
     if (mono_publishers_[stream].getNumSubscribers() == 0)
@@ -953,7 +907,7 @@ class ROSWrapperNodelet {
     mono_publishers_[stream].publish(*msg);
   }
 
-  void publishPoints(
+  void ROSWrapperNodelet::publishPoints(
       const api::StreamData &data, std::uint32_t seq, rclcpp::Time stamp) {
     // if (points_publisher_->get_subscription_count() == 0)
     //   return;
@@ -1010,7 +964,7 @@ class ROSWrapperNodelet {
     points_publisher_->publish(msg);
   }
 
-  void publishImu(
+  void ROSWrapperNodelet::publishImu(
       const api::MotionData &data, std::uint32_t seq, rclcpp::Time stamp) {
     if (pub_imu_->get_subscription_count() == 0)
       return;
@@ -1058,7 +1012,7 @@ class ROSWrapperNodelet {
     pub_imu_->publish(msg);
   }
 
-  void timestampAlign() {
+  void ROSWrapperNodelet::timestampAlign() {
     static std::vector<ImuData> acc_buf;
     static std::vector<ImuData> gyro_buf;
 
@@ -1113,7 +1067,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  void publishImuBySync() {
+  void ROSWrapperNodelet::publishImuBySync() {
     timestampAlign();
 
     for (int i = 0; i < imu_align_.size(); i++) {
@@ -1166,7 +1120,7 @@ class ROSWrapperNodelet {
     }
   }
 
-  void publishTemperature(
+  void ROSWrapperNodelet::publishTemperature(
     float temperature, std::uint32_t seq, rclcpp::Time stamp) {
     if (pub_temperature_->get_subscription_count() == 0)
       return;
@@ -1179,8 +1133,8 @@ class ROSWrapperNodelet {
     pub_temperature_->publish(msg);
   }
 
- private:
-  void initDevice() {
+
+  void ROSWrapperNodelet::initDevice() {
     std::shared_ptr<Device> device = nullptr;
 
     device = selectDevice();
@@ -1245,7 +1199,7 @@ class ROSWrapperNodelet {
     computeRectTransforms();
   }
 
-  std::shared_ptr<Device> selectDevice() {
+  std::shared_ptr<Device> ROSWrapperNodelet::selectDevice() {
     RCLCPP_INFO_STREAM(node_->get_logger(), "Detecting MYNT EYE devices");
 
     Context context;
@@ -1314,7 +1268,7 @@ class ROSWrapperNodelet {
     return nullptr;
   }
 
-  std::shared_ptr<IntrinsicsBase> getDefaultIntrinsics() {
+  std::shared_ptr<IntrinsicsBase> ROSWrapperNodelet::getDefaultIntrinsics() {
     auto res = std::make_shared<IntrinsicsPinhole>();
     res->width = 640;
     res->height = 400;
@@ -1336,7 +1290,7 @@ class ROSWrapperNodelet {
     return res;
   }
 
-  std::shared_ptr<Extrinsics> getDefaultExtrinsics() {
+  std::shared_ptr<Extrinsics> ROSWrapperNodelet::getDefaultExtrinsics() {
     auto res = std::make_shared<Extrinsics>();
     double rotation[9] = {
       9.9867908939669447e-01,  -6.3445566137485428e-03, 5.0988459509619687e-02,
@@ -1356,7 +1310,7 @@ class ROSWrapperNodelet {
     return res;
   }
 
-  void publishMesh() {
+  void ROSWrapperNodelet::publishMesh() {
     mesh_msg_.header.frame_id = base_frame_id_;
     mesh_msg_.header.stamp = node_->get_clock()->now();
     mesh_msg_.type = visualization_msgs::msg::Marker::MESH_RESOURCE;
@@ -1412,7 +1366,7 @@ class ROSWrapperNodelet {
   }
 
 
-  void computeRectTransforms() {
+  void ROSWrapperNodelet::computeRectTransforms() {
     assertm(api_, "");
     auto in_left_base = api_->GetIntrinsicsBase(Stream::LEFT);
     auto in_right_base = api_->GetIntrinsicsBase(Stream::RIGHT);
@@ -1463,7 +1417,7 @@ class ROSWrapperNodelet {
     RCLCPP_DEBUG_STREAM(node_->get_logger(), "q: " << q_);
   }
 
-  sensor_msgs::msg::CameraInfo::SharedPtr getCameraInfo(const Stream &stream) {
+  sensor_msgs::msg::CameraInfo::SharedPtr ROSWrapperNodelet::getCameraInfo(const Stream &stream) {
     if (camera_info_ptrs_.find(stream) != camera_info_ptrs_.end()) {
       return camera_info_ptrs_[stream];
     }
@@ -1533,7 +1487,7 @@ class ROSWrapperNodelet {
     return camera_info_ptrs_[stream];
   }
 
-  void publishStaticTransforms() {
+  void ROSWrapperNodelet::publishStaticTransforms() {
     rclcpp::Time tf_stamp = node_->get_clock()->now();
 
     // The left frame is used as the base frame.
@@ -1699,96 +1653,6 @@ class ROSWrapperNodelet {
     }
     static_tf_broadcaster_->sendTransform(l2i_msg);
   }
-
-  // ros::NodeHandle nh_;
-  // ros::NodeHandle private_nh_;
-
-  pthread_mutex_t mutex_data_;
-
-  Model model_;
-  std::map<Option, std::string> option_names_;
-  // camera:
-  //   LEFT, RIGHT, LEFT_RECTIFIED, RIGHT_RECTIFIED,
-  //   DISPARITY, DISPARITY_NORMALIZED,
-  //   DEPTH
-  std::map<Stream, image_transport::CameraPublisher> camera_publishers_;
-  std::map<Stream, sensor_msgs::msg::CameraInfo::SharedPtr> camera_info_ptrs_;
-  std::map<Stream, std::string> camera_encodings_;
-
-  // image: LEFT_RECTIFIED, RIGHT_RECTIFIED, DISPARITY, DISPARITY_NORMALIZED,
-  // DEPTH
-  std::map<Stream, image_transport::Publisher> image_publishers_;
-  std::map<Stream, std::string> image_encodings_;
-
-  // mono: LEFT, RIGHT
-  std::map<Stream, image_transport::Publisher> mono_publishers_;
-
-  // pointcloud: POINTS
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points_publisher_;
-
-  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
-  rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr pub_temperature_;
-
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_mesh_;  // < The publisher for camera mesh.
-  visualization_msgs::msg::Marker mesh_msg_;  // < Mesh message.
-
-  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
-
-  // ros::ServiceServer get_info_service_;
-  ::rclcpp::Service<mynt_eye_ros_msgs::srv::GetInfo>::SharedPtr get_info_service_;
-
-  // node params
-
-  std::string base_frame_id_;
-  std::string imu_frame_id_;
-  std::string temperature_frame_id_;
-  std::map<Stream, std::string> frame_ids_;
-
-  double gravity_;
-
-  // disparity type
-  DisparityComputingMethod disparity_type_;
-  // api
-
-  std::shared_ptr<API> api_;
-
-  // rectification transforms
-  cv::Mat left_r_, right_r_, left_p_, right_p_, q_;
-  cv::Rect left_roi_, right_roi_;
-
-  double time_beg_ = -1;
-  double left_time_beg_ = -1;
-  double right_time_beg_ = -1;
-  double imu_time_beg_ = -1;
-  std::size_t left_count_ = 0;
-  std::size_t right_count_ = 0;
-  std::size_t imu_count_ = 0;
-  std::size_t imu_sync_count_ = 0;
-  std::shared_ptr<ImuData> imu_accel_;
-  std::shared_ptr<ImuData> imu_gyro_;
-  bool publish_imu_by_sync_ = true;
-  std::map<Stream, bool> is_published_;
-  bool is_motion_published_;
-  bool is_started_;
-  int frame_rate_;
-  bool is_intrinsics_enable_;
-  std::vector<ImuData> imu_align_;
-  int skip_tag;
-  int skip_tmp_left_tag;
-  int skip_tmp_right_tag;
-  double mesh_rotation_x;
-  double mesh_rotation_y;
-  double mesh_rotation_z;
-  double mesh_position_x;
-  double mesh_position_y;
-  double mesh_position_z;
-  std::vector<int64_t> left_timestamps;
-  std::vector<int64_t> right_timestamps;
-
-  std::uint64_t unit_hard_time = std::numeric_limits<std::uint32_t>::max();
-
-  rclcpp::Node::SharedPtr node_;
-};
 
 MYNTEYE_END_NAMESPACE
 

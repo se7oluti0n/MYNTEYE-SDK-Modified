@@ -1,0 +1,36 @@
+mynteye_wrapper_node:
+  ros__parameters:
+    mynteye: "mynteye"
+    is_multiple: False
+    #depth_type  0: MONO16, 1: TYPE_16UC1
+    depth_type: 0
+
+    #<!-- node params -->
+    left_topic: "left/image_raw"
+    right_topic: "right/image_raw"
+    left_rect_topic: "left_rect/image_rect"
+    right_rect_topic: "right_rect/image_rect"
+    disparity_topic: "disparity/image_raw"
+    disparity_norm_topic: "disparity/image_norm"
+    depth_topic: "depth/image_raw"
+    points_topic: "points/data_raw"
+
+    left_mono_topic: "left/image_mono"
+    right_mono_topic: "right/image_mono"
+
+    imu_topic: "imu/data_raw"
+    temperature_topic: "temperature/data_raw"
+
+    base_frame_id: "mynteye_link"
+    left_frame_id: "mynteye_left_frame"
+    right_frame_id: "mynteye_right_frame"
+    left_rect_frame_id: "mynteye_left_rect_frame"
+    right_rect_frame_id: "mynteye_right_rect_frame"
+    disparity_frame_id: "mynteye_disparity_frame"
+    disparity_norm_frame_id: "mynteye_disparity_norm_frame"
+    points_frame_id: "mynteye_points_frame"
+    depth_frame_id: "mynteye_depth_frame"
+
+    temperature_frame_id: "mynteye_temperature_frame"
+
+    gravity: 9.8

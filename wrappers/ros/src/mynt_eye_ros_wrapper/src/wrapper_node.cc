@@ -11,14 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <rclcpp/rclcpp.hpp>
 
+#undef WITH_CAM_MODELS
+
+#include <rclcpp/rclcpp.hpp>
 #include "mynteye/logger.h"
+#include "wrapper_nodelet.h"
 
 int main(int argc, char *argv[]) {
   glog_init _(argc, argv);
 
   rclcpp::init(argc, argv);
+  auto ros2_node = rclcpp::Node::make_shared("mynteye_wrapper_node");
+
+  // mynteye::ROSWrapperNodelet nodelet(ros2_node);
+
   // ros::init(argc, argv, "mynteye_wrapper_node");
   // ros::console::set_logger_level(
   //     ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
@@ -30,6 +37,9 @@ int main(int argc, char *argv[]) {
   //     ros::this_node::getName(), "mynteye/ROSWrapperNodelet", remap, nargv);
 
   // ros::spin();
+  auto executor = rclcpp::executors::SingleThreadedExecutor();
+  executor.add_node(ros2_node);
+  executor.spin();
 
   rclcpp::shutdown();
   return 0;
