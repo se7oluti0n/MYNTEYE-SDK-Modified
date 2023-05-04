@@ -18,6 +18,7 @@ project(mynteye_samples VERSION 2.0.0 LANGUAGES C CXX)
 
 get_filename_component(PRO_DIR ${PROJECT_SOURCE_DIR} DIRECTORY)
 
+add_compile_options(-std=c++17)
 include(${PRO_DIR}/cmake/Common.cmake)
 include(${PRO_DIR}/cmake/Utils.cmake)
 
