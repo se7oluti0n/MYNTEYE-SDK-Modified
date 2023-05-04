@@ -90,6 +90,7 @@ public:
     void publishImuBySync();
     void publishTemperature(
         float temperature, std::uint32_t seq, rclcpp::Time stamp);
+
 private:
     void initDevice();
     std::shared_ptr<Device> selectDevice();
@@ -188,6 +189,8 @@ private:
   std::uint64_t unit_hard_time = std::numeric_limits<std::uint32_t>::max();
 
   rclcpp::Node::SharedPtr node_;
+
+  ::rclcpp::TimerBase::SharedPtr publish_timer_;
 };
 
 

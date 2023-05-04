@@ -45,6 +45,7 @@ inline double compute_time(const double end, const double start) {
   node_(node) {
     static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
     unit_hard_time *= 10;
+    onInit();
   }
 
   ROSWrapperNodelet::~ROSWrapperNodelet() {
@@ -430,12 +431,12 @@ inline double compute_time(const double end, const double start) {
                     std::placeholders::_2));
     RCLCPP_INFO_STREAM(node_->get_logger(), "Advertized service " << DEVICE_INFO_SERVICE);
 
-    node_->declare_parameter("model_rotation_x", 0);
-    node_->declare_parameter("model_rotation_y", 0);
-    node_->declare_parameter("model_rotation_z", 0);
-    node_->declare_parameter("model_position_x", 0);
-    node_->declare_parameter("model_position_y", 0);
-    node_->declare_parameter("model_position_z", 0);
+    node_->declare_parameter("model_rotation_x", 0.0);
+    node_->declare_parameter("model_rotation_y", 0.0);
+    node_->declare_parameter("model_rotation_z", 0.0);
+    node_->declare_parameter("model_position_x", 0.0);
+    node_->declare_parameter("model_position_y", 0.0);
+    node_->declare_parameter("model_position_z", 0.0);
     node_->declare_parameter("is_laserscan", false);
 
     publishStaticTransforms();
@@ -444,6 +445,13 @@ inline double compute_time(const double end, const double start) {
     //   publishTopics();
     //   loop_rate.sleep();
     // }
+
+
+
+    publish_timer_ = node_->create_wall_timer(
+      std::chrono::milliseconds(
+          int(1000 / frame_rate_)),
+      [this]() { publishTopics(); });
   }
 
   bool ROSWrapperNodelet::getInfo(

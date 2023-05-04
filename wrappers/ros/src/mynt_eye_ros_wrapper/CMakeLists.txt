@@ -119,7 +119,7 @@ install(TARGETS mynteye_wrapper_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY rviz config launch
+install(DIRECTORY rviz config launch mesh
   DESTINATION share/${PROJECT_NAME}/
 )
 
