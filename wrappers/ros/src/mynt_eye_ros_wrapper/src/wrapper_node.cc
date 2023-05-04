@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
   auto ros2_node = rclcpp::Node::make_shared("mynteye_wrapper_node");
 
-  // mynteye::ROSWrapperNodelet nodelet(ros2_node);
+  mynteye::ROSWrapperNodelet nodelet(ros2_node);
 
   // ros::init(argc, argv, "mynteye_wrapper_node");
   // ros::console::set_logger_level(
