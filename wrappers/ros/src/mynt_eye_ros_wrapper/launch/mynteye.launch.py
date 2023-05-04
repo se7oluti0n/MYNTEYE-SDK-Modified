@@ -5,33 +5,51 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
 from launch_ros.substitutions import FindPackageShare
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import Shutdown
+from launch.actions import Shutdown, GroupAction
+from ament_index_python.packages import get_package_share_directory
+import os
 
 
 def generate_launch_description():
-  mynt_eye_arg = DeclareLaunchArgument('mynteye', default_value='mynteye')
-  is_multiple_arg = DeclareLaunchArgument('is_multiple', default_value='False')
-  serial_number_arg = DeclareLaunchArgument('serial_number', default_value='')
-  depth_type_arg = DeclareLaunchArgument('depth_type', default_value='0')
-  left_topic_arg = DeclareLaunchArgument('left_topic', default_value='left/image_raw')
-  right_topic_arg = DeclareLaunchArgument('right_topic', default_value='right/image_raw')
-  
+  rviz = LaunchConfiguration('rviz')
+  rviz_arg = DeclareLaunchArgument('rviz', default_value = 'False')
+  main_config = os.path.join(
+        get_package_share_directory('mynt_eye_ros_wrapper'), 'config', 'mynteye.yaml')
+  standard_config = os.path.join(
+        get_package_share_directory('mynt_eye_ros_wrapper'), 'config', 'device', 'standard.yaml')
+  standard2_config = os.path.join(
+        get_package_share_directory('mynt_eye_ros_wrapper'), 'config', 'device', 'standard2.yaml')
+  process_config = os.path.join(
+        get_package_share_directory('mynt_eye_ros_wrapper'), 'config', 'process', 'process_config.yaml')
+  mesh_config = os.path.join(
+        get_package_share_directory('mynt_eye_ros_wrapper'), 'config', 'mesh', 'mesh.yaml')
 
-
-
-
-
-  tvc_loc_tools = Node(
-    package='tvc_loc_tools',
-    executable='tvc_loc_tools',
-    name='tvc_loc_tools',
+ 
+  mynteye_wrapper_node = Node(
+    package='mynt_eye_ros_wrapper',
+    executable='mynteye_wrapper_node',
+    name='mynteye_wrapper_node',
     output='screen',
     parameters=[
-      {'use_sim_time': LaunchConfiguration('use_sim_time')}]
+      main_config, standard_config, standard2_config, process_config, mesh_config ]
 
   )
 
+  rviz_node = GroupAction(
+        condition=IfCondition(rviz),
+        actions = [
+
+            Node(
+                package = 'rviz2',
+                executable = 'rviz2',
+                on_exit = Shutdown(),
+                arguments = ['-d', FindPackageShare('mynt_eye_ros_wrapper').find('mynt_eye_ros_wrapper') + '/rviz/mynteye.rviz'],
+            )
+        ]
+    )
+
   return LaunchDescription([
-    use_sim_time_arg,
-    tvc_loc_tools
+    rviz_arg,
+    mynteye_wrapper_node,
+    rviz_node
   ])

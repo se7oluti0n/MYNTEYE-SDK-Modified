@@ -6,22 +6,23 @@ mynteye_wrapper_node:
     depth_type: 0
 
     #<!-- node params -->
-    left_topic: "left/image_raw"
-    right_topic: "right/image_raw"
-    left_rect_topic: "left_rect/image_rect"
-    right_rect_topic: "right_rect/image_rect"
-    disparity_topic: "disparity/image_raw"
-    disparity_norm_topic: "disparity/image_norm"
-    depth_topic: "depth/image_raw"
-    points_topic: "points/data_raw"
+    left_topic: "mynteye/left/image_raw"
+    right_topic: "mynteye/right/image_raw"
+    left_rect_topic: "mynteye/left_rect/image_rect"
+    right_rect_topic: "mynteye/right_rect/image_rect"
+    disparity_topic: "mynteye/disparity/image_raw"
+    disparity_norm_topic: "mynteye/disparity/image_norm"
+    depth_topic: "mynteye/depth/image_raw"
+    points_topic: "mynteye/points/data_raw"
 
-    left_mono_topic: "left/image_mono"
-    right_mono_topic: "right/image_mono"
+    left_mono_topic: "mynteye/left/image_mono"
+    right_mono_topic: "mynteye/right/image_mono"
 
-    imu_topic: "imu/data_raw"
-    temperature_topic: "temperature/data_raw"
+    imu_topic: "mynteye/imu/data_raw"
+    temperature_topic: "mynteye/temperature/data_raw"
 
     base_frame_id: "mynteye_link"
+    imu_frame_id: "mynteye_link"
     left_frame_id: "mynteye_left_frame"
     right_frame_id: "mynteye_right_frame"
     left_rect_frame_id: "mynteye_left_rect_frame"
