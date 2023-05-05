@@ -422,10 +422,10 @@ inline double compute_time(const double end, const double start) {
 
     // services
 
-    const std::string DEVICE_INFO_SERVICE = "get_info";
+    const std::string DEVICE_INFO_SERVICE = "mynteye/get_info";
     // get_info_service_ = node_->create_publisherService(
     //     DEVICE_INFO_SERVICE, &ROSWrapperNodelet::getInfo, this);
-    node_->create_service<mynt_eye_ros_msgs::srv::GetInfo>(
+    get_info_service_ = node_->create_service<mynt_eye_ros_msgs::srv::GetInfo>(
           DEVICE_INFO_SERVICE,
           std::bind(&ROSWrapperNodelet::getInfo, this, std::placeholders::_1,
                     std::placeholders::_2));
@@ -439,7 +439,7 @@ inline double compute_time(const double end, const double start) {
     node_->declare_parameter("model_position_z", 0.0);
     node_->declare_parameter("is_laserscan", false);
 
-    publishStaticTransforms();
+    // publishStaticTransforms();
     // ros::Rate loop_rate(frame_rate_);
     // while (private_nh_.ok()) {
     //   publishTopics();
